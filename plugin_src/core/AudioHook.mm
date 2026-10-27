@@ -183,13 +183,14 @@ static OSStatus Hooked_AudioUnitSetProperty(AudioUnit            inUnit,
         (inScope == kAudioUnitScope_Input || inScope == kAudioUnitScope_Global) &&
         inElement == 0 && inData && inDataSize >= sizeof(AURenderCallbackStruct)) {
         const auto* cb = static_cast<const AURenderCallbackStruct*>(inData);
-        if (cb->inputProc && cb->inputProc != CustomMasterRenderCallback) {
+        const AURenderCallback customCb = reinterpret_cast<AURenderCallback>(&CustomMasterRenderCallback);
+        if (cb->inputProc && cb->inputProc != customCb) {
             sOrigRenderProc = cb->inputProc;
             sHookInstalled.store(true, std::memory_order_relaxed);
             queryUnitASBD(inUnit);
 
             AURenderCallbackStruct hookedCb;
-            hookedCb.inputProc       = CustomMasterRenderCallback;
+            hookedCb.inputProc       = customCb;
             hookedCb.inputProcRefCon = cb->inputProcRefCon;
             return sOrigSetProperty(inUnit, inID, inScope, inElement, &hookedCb, sizeof(hookedCb));
         }
