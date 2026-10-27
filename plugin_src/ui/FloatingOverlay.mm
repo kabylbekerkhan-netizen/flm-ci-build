@@ -46,11 +46,15 @@ static CGRect ExpandedHitBounds(CGRect bounds) {
     NSMutableArray<FLMHitButton*>* _tabButtons;
 
     UIView*          _mod1Container;
+    UIView*          _mod2Container;
     UIView*          _stubContainer;
     UILabel*         _stubLabel;
 
     UILabel*         _valLabels[4];
     FLMHitSlider*    _sliders[4];
+
+    UILabel*         _mod2ValLabels[4];
+    FLMHitSlider*    _mod2Sliders[4];
 }
 
 + (instancetype)shared {
@@ -266,7 +270,19 @@ static CGRect ExpandedHitBounds(CGRect bounds) {
 
     [self buildMod1Controls];
 
-    // Stub Container for Tabs 2..5
+    // Module 2 Container (Low-Latency Auto-Tune & Formant Shifter)
+    _mod2Container = [[UIView alloc] initWithFrame:_mod1Container.frame];
+    _mod2Container.accessibilityIdentifier = @"mod2Container";
+    _mod2Container.backgroundColor = ColorPanelBg();
+    _mod2Container.layer.cornerRadius = 10.0;
+    _mod2Container.layer.borderWidth = 0.9;
+    _mod2Container.layer.borderColor = [ColorOxbloodHi() colorWithAlphaComponent:0.65].CGColor;
+    _mod2Container.hidden = YES;
+    [_mainPanel addSubview:_mod2Container];
+
+    [self buildMod2Controls];
+
+    // Stub Container for Tabs 3..5
     _stubContainer = [[UIView alloc] initWithFrame:_mod1Container.frame];
     _stubContainer.backgroundColor = ColorPanelBg();
     _stubContainer.layer.cornerRadius = 10.0;
@@ -334,6 +350,56 @@ static CGRect ExpandedHitBounds(CGRect bounds) {
     }
 }
 
+- (void)buildMod2Controls {
+    NSArray<NSString*>* titles = @[
+        @"RETUNE SPEED (0ms = HARD TUNE)",
+        @"FORMANT SHIFT (THROAT -12..+12 ST)",
+        @"KEY & SCALE QUANTIZER",
+        @"VOCAL TUNE DRY / WET MIX"
+    ];
+    auto& mod2 = flm_dsp::RackChain::shared().vocalTune();
+    float initVals[4] = {
+        mod2.getRetuneSpeedMs(),
+        mod2.getFormantSemitones(),
+        static_cast<float>(mod2.getScalePreset()),
+        mod2.getMix()
+    };
+    float minVals[4] = {  0.0f, -12.0f,  0.0f, 0.0f};
+    float maxVals[4] = {150.0f,  12.0f, 24.0f, 1.0f};
+
+    CGFloat cw = _mod2Container.bounds.size.width;
+    for (int i = 0; i < 4; ++i) {
+        CGFloat y = 8.0 + i * 51.0;
+
+        UILabel* nameLbl = [[UILabel alloc] initWithFrame:CGRectMake(14, y, 270, 15)];
+        nameLbl.text = titles[i];
+        nameLbl.textColor = ColorChromeText();
+        nameLbl.font = [UIFont boldSystemFontOfSize:10.5];
+        [_mod2Container addSubview:nameLbl];
+
+        UILabel* valLbl = [[UILabel alloc] initWithFrame:CGRectMake(cw - 134, y, 120, 15)];
+        valLbl.textAlignment = NSTextAlignmentRight;
+        valLbl.textColor = ColorChrome();
+        valLbl.font = [UIFont monospacedDigitSystemFontOfSize:10.5 weight:UIFontWeightBold];
+        [_mod2Container addSubview:valLbl];
+        _mod2ValLabels[i] = valLbl;
+
+        FLMHitSlider* sld = [[FLMHitSlider alloc] initWithFrame:CGRectMake(14, y + 16, cw - 28, 32)];
+        sld.tag = i;
+        sld.minimumValue = minVals[i];
+        sld.maximumValue = maxVals[i];
+        sld.value = initVals[i];
+        sld.minimumTrackTintColor = ColorOxbloodHi();
+        sld.maximumTrackTintColor = [UIColor colorWithWhite:0.22 alpha:1.0];
+        sld.thumbTintColor = ColorChromeText();
+        [sld addTarget:self action:@selector(onMod2SliderChanged:) forControlEvents:UIControlEventValueChanged];
+        [_mod2Container addSubview:sld];
+        _mod2Sliders[i] = sld;
+
+        [self updateMod2ValueLabelForIndex:i value:initVals[i]];
+    }
+}
+
 - (void)refreshDiagnosticsStatus {
     bool safe = flm_dsp::AudioHook::isSafeMode();
     bool hooked = flm_dsp::AudioHook::isHookInstalled();
@@ -370,6 +436,9 @@ static CGRect ExpandedHitBounds(CGRect bounds) {
             _diagLabel.textColor = hooked ? ColorChromeText() : ColorChrome();
         }
     }
+    if (_mod2Container && !_mod2Container.hidden && _mod2Sliders[2]) {
+        [self updateMod2ValueLabelForIndex:2 value:_mod2Sliders[2].value];
+    }
 }
 
 - (void)updateValueLabelForIndex:(int)idx value:(float)val {
@@ -394,6 +463,50 @@ static CGRect ExpandedHitBounds(CGRect bounds) {
     [self updateValueLabelForIndex:idx value:v];
 }
 
+- (void)updateMod2ValueLabelForIndex:(int)idx value:(float)val {
+    if (idx == 0) {
+        _mod2ValLabels[0].text = [NSString stringWithFormat:@"%.0f ms", val];
+    } else if (idx == 1) {
+        _mod2ValLabels[1].text = [NSString stringWithFormat:@"%+.1f ST", val];
+    } else if (idx == 2) {
+        int preset = (int)lroundf(val);
+        auto& mod2 = flm_dsp::RackChain::shared().vocalTune();
+        int det = mod2.getDetectedMidiNote();
+        int cor = mod2.getCorrectedMidiNote();
+        const char* scName = flm_dsp::Mod2_VocalTune::scalePresetName(preset);
+        if (det >= 0 && cor >= 0) {
+            _mod2ValLabels[2].text = [NSString stringWithFormat:@"%s [%s>%s]",
+                                      scName,
+                                      flm_dsp::Mod2_VocalTune::midiNoteName(det),
+                                      flm_dsp::Mod2_VocalTune::midiNoteName(cor)];
+        } else {
+            _mod2ValLabels[2].text = [NSString stringWithUTF8String:scName];
+        }
+    } else if (idx == 3) {
+        _mod2ValLabels[3].text = [NSString stringWithFormat:@"%.0f %%", val * 100.0f];
+    }
+}
+
+- (void)onMod2SliderChanged:(UISlider*)sender {
+    int idx = (int)sender.tag;
+    float v = sender.value;
+    auto& mod2 = flm_dsp::RackChain::shared().vocalTune();
+    switch (idx) {
+        case 0: mod2.setRetuneSpeedMs(v); break;
+        case 1: mod2.setFormantSemitones(v); break;
+        case 2: {
+            int preset = (int)lroundf(v);
+            sender.value = (float)preset;
+            v = (float)preset;
+            mod2.setScalePreset(preset);
+            break;
+        }
+        case 3: mod2.setMix(v); break;
+        default: break;
+    }
+    [self updateMod2ValueLabelForIndex:idx value:v];
+}
+
 - (void)onSelectTab:(UIButton*)sender {
     [self updateTabSelection:(int)sender.tag];
 }
@@ -411,9 +524,15 @@ static CGRect ExpandedHitBounds(CGRect bounds) {
     }
     if (selectedIdx == 0) {
         _mod1Container.hidden = NO;
+        _mod2Container.hidden = YES;
+        _stubContainer.hidden = YES;
+    } else if (selectedIdx == 1) {
+        _mod1Container.hidden = YES;
+        _mod2Container.hidden = NO;
         _stubContainer.hidden = YES;
     } else {
         _mod1Container.hidden = YES;
+        _mod2Container.hidden = YES;
         _stubContainer.hidden = NO;
         _stubLabel.text = [NSString stringWithFormat:@"MODULE %d // PASS-THROUGH STUB\n(Scheduled for Stage %d)", selectedIdx + 1, selectedIdx + 1];
     }

@@ -45,6 +45,7 @@ jobs:
               build/fishhook.o \
               plugin_src/core/RackChain.cpp \
               plugin_src/modules/Mod1_Brutalizer.cpp \
+              plugin_src/modules/Mod2_VocalTune.cpp \
               plugin_src/core/AudioHook.mm \
               plugin_src/ui/WaveformView.mm \
               plugin_src/ui/FloatingOverlay.mm \
@@ -54,6 +55,7 @@ jobs:
               -framework CoreGraphics \
               -framework QuartzCore \
               -framework AudioToolbox \
+              -framework Accelerate \
               -o build/FLM_CustomDSP.dylib
 
             echo "=== Ad-hoc codesign -f -s - build/FLM_CustomDSP.dylib ==="
@@ -121,6 +123,7 @@ jobs:
               build/sim_fishhook.o \
               plugin_src/core/RackChain.cpp \
               plugin_src/modules/Mod1_Brutalizer.cpp \
+              plugin_src/modules/Mod2_VocalTune.cpp \
               plugin_src/core/AudioHook.mm \
               plugin_src/ui/WaveformView.mm \
               plugin_src/ui/FloatingOverlay.mm \
@@ -130,6 +133,7 @@ jobs:
               -framework CoreGraphics \
               -framework QuartzCore \
               -framework AudioToolbox \
+              -framework Accelerate \
               -o "$APP_DIR/FLMSimHost"
           } 2>&1 | tee build/sim_compile.log
 
@@ -144,6 +148,7 @@ jobs:
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>CFBundleShortVersionString</key><string>1.0</string>
             <key>CFBundleVersion</key><string>1</string>
+            <key>UILaunchScreen</key><dict/>
             <key>NSLocalNetworkUsageDescription</key><string>Simulator UI Telemetry</string>
             <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
             <key>UISupportedInterfaceOrientations</key>
