@@ -11,7 +11,7 @@ on:
 jobs:
   build-dylib:
     name: Job 1 - Build Production arm64 FLM_CustomDSP.dylib
-    runs-on: macos-latest
+    runs-on: macos-14
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -86,9 +86,10 @@ jobs:
 
   simulator-screenshots:
     name: Job 2 - iOS Simulator UI Screenshots (Optional)
+    if: github.event_name == 'workflow_dispatch'
     needs: build-dylib
     continue-on-error: true
-    runs-on: macos-latest
+    runs-on: macos-14
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
