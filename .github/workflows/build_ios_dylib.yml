@@ -1,0 +1,185 @@
+name: Build FLM_CustomDSP iOS Dylib & Simulator UI Screenshots
+
+on:
+  push:
+    paths:
+      - 'plugin_src/**'
+      - 'scripts/**'
+      - '.github/workflows/build_ios_dylib.yml'
+  workflow_dispatch:
+
+jobs:
+  build-dylib:
+    name: Job 1 - Build Production arm64 FLM_CustomDSP.dylib
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Compile Production FLM_CustomDSP.dylib (arm64 iphoneos)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          IOS_SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+
+          {
+            echo "=== Compiling fishhook.c (arm64 iphoneos) ==="
+            xcrun -sdk iphoneos clang \
+              -arch arm64 \
+              -isysroot "$IOS_SDK" \
+              -miphoneos-version-min=14.0 \
+              -Wall -Wextra -Wno-unused-parameter \
+              -O2 -fPIC \
+              -c plugin_src/vendor/fishhook.c \
+              -o build/fishhook.o
+
+            echo "=== Compiling & Linking FLM_CustomDSP.dylib (arm64 iphoneos) ==="
+            xcrun -sdk iphoneos clang++ \
+              -arch arm64 \
+              -isysroot "$IOS_SDK" \
+              -miphoneos-version-min=14.0 \
+              -std=c++17 -fobjc-arc -Wall -Wextra -O2 -fPIC \
+              -dynamiclib \
+              -install_name "@rpath/FLM_CustomDSP.dylib" \
+              build/fishhook.o \
+              plugin_src/core/RackChain.cpp \
+              plugin_src/modules/Mod1_Brutalizer.cpp \
+              plugin_src/core/AudioHook.mm \
+              plugin_src/ui/WaveformView.mm \
+              plugin_src/ui/FloatingOverlay.mm \
+              plugin_src/core/DylibEntry.mm \
+              -framework UIKit \
+              -framework Foundation \
+              -framework CoreGraphics \
+              -framework QuartzCore \
+              -framework AudioToolbox \
+              -o build/FLM_CustomDSP.dylib
+
+            echo "=== Ad-hoc codesign -f -s - build/FLM_CustomDSP.dylib ==="
+            codesign -f -s - build/FLM_CustomDSP.dylib
+
+            echo "=== codesign -dvvv build/FLM_CustomDSP.dylib ==="
+            codesign -dvvv build/FLM_CustomDSP.dylib 2>&1
+
+            echo "=== otool -L build/FLM_CustomDSP.dylib ==="
+            otool -L build/FLM_CustomDSP.dylib
+
+            echo "=== otool -l build/FLM_CustomDSP.dylib | grep -A3 LC_ID_DYLIB ==="
+            otool -l build/FLM_CustomDSP.dylib | grep -A3 LC_ID_DYLIB
+
+            echo "=== lipo -info build/FLM_CustomDSP.dylib ==="
+            lipo -info build/FLM_CustomDSP.dylib
+          } 2>&1 | tee build/compile.log
+
+      - name: Upload FLM_CustomDSP.dylib & Compile Log Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FLM_CustomDSP_Bundle
+          path: |
+            build/FLM_CustomDSP.dylib
+            build/compile.log
+          if-no-files-found: error
+
+  simulator-screenshots:
+    name: Job 2 - iOS Simulator UI Screenshots (Optional)
+    needs: build-dylib
+    continue-on-error: true
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Python UI Geometry Audit & Build Simulator Host App
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/screenshots
+          python3 scripts/ui_vision_audit.py
+          python3 scripts/ui_receiver.py --self-test
+
+          SIM_SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          HOST_ARCH=$(uname -m)
+          APP_DIR="build/FLMSimHost.app"
+          mkdir -p "$APP_DIR"
+
+          {
+            xcrun -sdk iphonesimulator clang \
+              -arch "$HOST_ARCH" \
+              -isysroot "$SIM_SDK" \
+              -mios-simulator-version-min=15.0 \
+              -Wall -Wextra -Wno-unused-parameter \
+              -O2 -c plugin_src/vendor/fishhook.c \
+              -o build/sim_fishhook.o
+
+            xcrun -sdk iphonesimulator clang++ \
+              -arch "$HOST_ARCH" \
+              -isysroot "$SIM_SDK" \
+              -mios-simulator-version-min=15.0 \
+              -std=c++17 -fobjc-arc -Wall -Wextra -O2 \
+              build/sim_fishhook.o \
+              plugin_src/core/RackChain.cpp \
+              plugin_src/modules/Mod1_Brutalizer.cpp \
+              plugin_src/core/AudioHook.mm \
+              plugin_src/ui/WaveformView.mm \
+              plugin_src/ui/FloatingOverlay.mm \
+              plugin_src/sim_host/SimHostApp.mm \
+              -framework UIKit \
+              -framework Foundation \
+              -framework CoreGraphics \
+              -framework QuartzCore \
+              -framework AudioToolbox \
+              -o "$APP_DIR/FLMSimHost"
+          } 2>&1 | tee build/sim_compile.log
+
+          cat > "$APP_DIR/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key><string>FLMSimHost</string>
+            <key>CFBundleIdentifier</key><string>com.flm.customdsp.simhost</string>
+            <key>CFBundleName</key><string>FLMSimHost</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>1.0</string>
+            <key>CFBundleVersion</key><string>1</string>
+            <key>NSLocalNetworkUsageDescription</key><string>Simulator UI Telemetry</string>
+            <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
+            <key>UISupportedInterfaceOrientations</key>
+            <array>
+              <string>UIInterfaceOrientationLandscapeLeft</string>
+              <string>UIInterfaceOrientationLandscapeRight</string>
+            </array>
+          </dict>
+          </plist>
+          EOF
+
+          codesign -f -s - "$APP_DIR"
+
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import sys,json; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k,v in d.items() if 'iOS' in k for x in v if 'iPhone' in x['name']))")
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+
+          python3 scripts/ui_receiver.py &
+          REC_PID=$!
+
+          SIM_SCREENSHOT_DIR="$PWD/build/screenshots" xcrun simctl install "$UDID" "$APP_DIR"
+          SIMCTL_CHILD_SIM_SCREENSHOT_DIR="$PWD/build/screenshots" xcrun simctl launch "$UDID" com.flm.customdsp.simhost
+          sleep 3
+
+          xcrun simctl io "$UDID" screenshot "build/screenshots/simctl_booted_screen.png"
+          kill $REC_PID || true
+          cp workspace/ui_preview_stage1.png build/screenshots/
+
+      - name: Upload Simulator UI Screenshots Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FLM_Simulator_Screenshots
+          path: |
+            build/sim_compile.log
+            build/screenshots/*.png
+            workspace/ui_audit_report.json
+            workspace/ui_snapshots/*
+          if-no-files-found: warn
