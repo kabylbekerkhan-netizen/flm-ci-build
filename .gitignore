@@ -1,0 +1,18 @@
+# Binaries, archives, extracted proprietary assets & build outputs (NEVER COMMIT)
+*.ipa
+*.dwp
+*.instr
+*.flmpst
+*.wav
+*.flac
+*.dylib
+*.o
+*.app/
+target.ipa
+dist/
+workspace/
+build/
+input_samples/
+__pycache__/
+*.pyc
+.DS_Store
